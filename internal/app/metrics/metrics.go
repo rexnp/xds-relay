@@ -1,3 +1,5 @@
+
+
 // Package metrics contains all the metrics constants used in xds-relay.
 package metrics
 
@@ -58,6 +60,9 @@ const (
 	ScopeUpstreamRDS = "rds"
 	// scope: .upstream.eds.*
 	ScopeUpstreamEDS = "eds"
+
+	// scope: .upstream.ads.*
+	ScopeUpstreamADS = "ads"
 
 	UpstreamStreamOpened = "stream_opened" // counter, # of times a gRPC stream was opened to the origin server.
 

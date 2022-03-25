@@ -16,8 +16,9 @@ import (
 	endpointservice "github.com/envoyproxy/go-control-plane/envoy/service/endpoint/v3"
 	listenerservice "github.com/envoyproxy/go-control-plane/envoy/service/listener/v3"
 	routeservice "github.com/envoyproxy/go-control-plane/envoy/service/route/v3"
-	"github.com/envoyproxy/go-control-plane/pkg/resource/v2"
-	resourcev3 "github.com/envoyproxy/go-control-plane/pkg/resource/v3"
+	ads "github.com/envoyproxy/go-control-plane/envoy/service/discovery/v3"
+	// "github.com/envoyproxy/go-control-plane/pkg/resource/v2"
+	// resourcev3 "github.com/envoyproxy/go-control-plane/pkg/resource/v3"
 	"github.com/envoyproxy/xds-relay/internal/pkg/log"
 	"github.com/envoyproxy/xds-relay/internal/pkg/util"
 	"github.com/uber-go/tally"
@@ -64,6 +65,7 @@ type client struct {
 	rdsClientV3 routeservice.RouteDiscoveryServiceClient
 	edsClientV3 endpointservice.EndpointDiscoveryServiceClient
 	cdsClientV3 clusterservice.ClusterDiscoveryServiceClient
+	adsClientV3 ads.AggregatedDiscoveryServiceClient
 	callOptions CallOptions
 
 	logger log.Logger
@@ -141,6 +143,9 @@ func New(
 	edsClientV3 := endpointservice.NewEndpointDiscoveryServiceClient(conn)
 	cdsClientV3 := clusterservice.NewClusterDiscoveryServiceClient(conn)
 
+	adsClientV3 := ads.NewAggregatedDiscoveryServiceClient(conn)
+
+
 	shutdownSignal := make(chan struct{})
 	go shutDown(ctx, conn, shutdownSignal)
 
@@ -153,6 +158,8 @@ func New(
 		rdsClientV3: rdsClientV3,
 		edsClientV3: edsClientV3,
 		cdsClientV3: cdsClientV3,
+		adsClientV3: adsClientV3,
+
 		callOptions: callOptions,
 		logger:      namedLogger,
 		scope:       subScope,
@@ -220,45 +227,48 @@ func (m *client) handleStreamsWithRetry(
 			m.logger.With("aggregated_key", aggregatedKey, "err", ctx.Err()).Debug(ctx, "context cancelled")
 			return
 		default:
-			switch request.GetTypeURL() {
-			case resource.ListenerType:
-				s, err = m.ldsClient.StreamListeners(childCtx)
-				stream = transport.NewStreamV2(s, request, m.logger)
-				scope = m.scope.SubScope(metrics.ScopeUpstreamLDS)
-			case resource.ClusterType:
-				s, err = m.cdsClient.StreamClusters(childCtx)
-				stream = transport.NewStreamV2(s, request, m.logger)
-				scope = m.scope.SubScope(metrics.ScopeUpstreamCDS)
-			case resource.RouteType:
-				s, err = m.rdsClient.StreamRoutes(childCtx)
-				stream = transport.NewStreamV2(s, request, m.logger)
-				scope = m.scope.SubScope(metrics.ScopeUpstreamRDS)
-			case resource.EndpointType:
-				s, err = m.edsClient.StreamEndpoints(childCtx)
-				stream = transport.NewStreamV2(s, request, m.logger)
-				scope = m.scope.SubScope(metrics.ScopeUpstreamEDS)
-			case resourcev3.ListenerType:
-				s, err = m.ldsClientV3.StreamListeners(childCtx)
-				stream = transport.NewStreamV3(s, request, m.logger)
-				scope = m.scope.SubScope(metrics.ScopeUpstreamLDS)
-			case resourcev3.ClusterType:
-				s, err = m.cdsClientV3.StreamClusters(childCtx)
-				stream = transport.NewStreamV3(s, request, m.logger)
-				scope = m.scope.SubScope(metrics.ScopeUpstreamCDS)
-			case resourcev3.RouteType:
-				s, err = m.rdsClientV3.StreamRoutes(childCtx)
-				stream = transport.NewStreamV3(s, request, m.logger)
-				scope = m.scope.SubScope(metrics.ScopeUpstreamRDS)
-			case resourcev3.EndpointType:
-				s, err = m.edsClientV3.StreamEndpoints(childCtx)
-				stream = transport.NewStreamV3(s, request, m.logger)
-				scope = m.scope.SubScope(metrics.ScopeUpstreamEDS)
-			default:
-				handleError(ctx, m.logger, aggregatedKey, "Unsupported Type Url", func() {}, fmt.Errorf(request.GetTypeURL()))
-				cancel()
-				close(respCh)
-				return
-			}
+			s, err = m.adsClientV3.StreamAggregatedResources(childCtx)
+			stream = transport.NewStreamV3(s, request, m.logger)
+			scope = m.scope.SubScope(metrics.ScopeUpstreamADS)
+			// switch request.GetTypeURL() {
+			// case resource.ListenerType:
+			// 	s, err = m.ldsClient.StreamListeners(childCtx)
+			// 	stream = transport.NewStreamV2(s, request, m.logger)
+			// 	scope = m.scope.SubScope(metrics.ScopeUpstreamLDS)
+			// case resource.ClusterType:
+			// 	s, err = m.cdsClient.StreamClusters(childCtx)
+			// 	stream = transport.NewStreamV2(s, request, m.logger)
+			// 	scope = m.scope.SubScope(metrics.ScopeUpstreamCDS)
+			// case resource.RouteType:
+			// 	s, err = m.rdsClient.StreamRoutes(childCtx)
+			// 	stream = transport.NewStreamV2(s, request, m.logger)
+			// 	scope = m.scope.SubScope(metrics.ScopeUpstreamRDS)
+			// case resource.EndpointType:
+			// 	s, err = m.edsClient.StreamEndpoints(childCtx)
+			// 	stream = transport.NewStreamV2(s, request, m.logger)
+			// 	scope = m.scope.SubScope(metrics.ScopeUpstreamEDS)
+			// case resourcev3.ListenerType:
+			// 	s, err = m.ldsClientV3.StreamListeners(childCtx)
+			// 	stream = transport.NewStreamV3(s, request, m.logger)
+			// 	scope = m.scope.SubScope(metrics.ScopeUpstreamLDS)
+			// case resourcev3.ClusterType:
+			// 	s, err = m.cdsClientV3.StreamClusters(childCtx)
+			// 	stream = transport.NewStreamV3(s, request, m.logger)
+			// 	scope = m.scope.SubScope(metrics.ScopeUpstreamCDS)
+			// case resourcev3.RouteType:
+			// 	s, err = m.rdsClientV3.StreamRoutes(childCtx)
+			// 	stream = transport.NewStreamV3(s, request, m.logger)
+			// 	scope = m.scope.SubScope(metrics.ScopeUpstreamRDS)
+			// case resourcev3.EndpointType:
+			// 	s, err = m.edsClientV3.StreamEndpoints(childCtx)
+			// 	stream = transport.NewStreamV3(s, request, m.logger)
+			// 	scope = m.scope.SubScope(metrics.ScopeUpstreamEDS)
+			// default:
+			// 	handleError(ctx, m.logger, aggregatedKey, "Unsupported Type Url", func() {}, fmt.Errorf(request.GetTypeURL()))
+			// 	cancel()
+			// 	close(respCh)
+			// 	return
+			// }
 			scope = scope.Tagged(map[string]string{metrics.TagName: aggregatedKey})
 			if err != nil {
 				m.logger.With("request_type", request.GetTypeURL(), "aggregated_key", aggregatedKey).Warn(ctx, "stream failed")
